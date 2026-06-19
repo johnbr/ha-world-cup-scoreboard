@@ -10,6 +10,7 @@
  *   entity: sensor.world_cup_scoreboard   # default
  *   title: World Cup                       # optional header text
  *   show_featured: true                    # pin the favorite team at top
+ *   featured_only: false                   # show ONLY the favorite team's match
  *   show_completed: true                   # include finished matches
  *   max_matches: 0                         # 0 = no limit
  */
@@ -39,6 +40,7 @@ class WorldCupScoreboardCard extends HTMLElement {
       entity: "sensor.world_cup_scoreboard",
       title: "World Cup",
       show_featured: true,
+      featured_only: false,
       show_completed: true,
       max_matches: 0,
       ...(config || {}),
@@ -125,15 +127,22 @@ class WorldCupScoreboardCard extends HTMLElement {
     const attrs = st.attributes || {};
     const cfg = this._config;
     let matches = Array.isArray(attrs.matches) ? attrs.matches.slice() : [];
-    const featured = cfg.show_featured && attrs.featured && attrs.featured.id
+    // featured_only implies the featured match is shown (it's all there is).
+    const showFeatured = cfg.show_featured || cfg.featured_only;
+    const featured = showFeatured && attrs.featured && attrs.featured.id
       ? attrs.featured : null;
 
-    if (!cfg.show_completed) {
-      matches = matches.filter((m) => m.status.state !== STATE_POST);
+    if (cfg.featured_only) {
+      // Only the favorite team's match; suppress the rest of the board.
+      matches = [];
+    } else {
+      if (!cfg.show_completed) {
+        matches = matches.filter((m) => m.status.state !== STATE_POST);
+      }
+      // Avoid showing the featured match twice.
+      if (featured) matches = matches.filter((m) => m.id !== featured.id);
+      if (cfg.max_matches > 0) matches = matches.slice(0, cfg.max_matches);
     }
-    // Avoid showing the featured match twice.
-    if (featured) matches = matches.filter((m) => m.id !== featured.id);
-    if (cfg.max_matches > 0) matches = matches.slice(0, cfg.max_matches);
 
     const header = `
       <div class="header">
@@ -141,9 +150,14 @@ class WorldCupScoreboardCard extends HTMLElement {
         <div class="sub">${esc(attrs.league || "")}${attrs.season ? " · " + esc(attrs.season) : ""}${attrs.live_count ? ` · ${attrs.live_count} live` : ""}</div>
       </div>`;
 
+    const emptyMsg = cfg.featured_only
+      ? (attrs.favorite_team
+          ? `${esc(attrs.favorite_team)} has no match on the current board.`
+          : "No favorite team set — re-add the integration to choose one.")
+      : "No matches scheduled.";
     const body = matches.length || featured
       ? `${featured ? this._row(featured, true) : ""}${matches.map((m) => this._row(m, false)).join("")}`
-      : `<div class="empty">No matches scheduled.</div>`;
+      : `<div class="empty">${esc(emptyMsg)}</div>`;
 
     this.shadowRoot.innerHTML = this._styles() +
       `<ha-card>${header}<div class="list">${body}</div></ha-card>`;

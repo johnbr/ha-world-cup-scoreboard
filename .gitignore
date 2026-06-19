@@ -1,7 +1,25 @@
 __pycache__/
 *.py[cod]
-.venv/
+
+# Tooling caches
 .ruff_cache/
 .pytest_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Local virtualenvs
+.venv/
+venv/
+
+# JS dev tooling
+node_modules/
+
+# Scratch
 *.tmp
 /tmp_*.json
+
+# Local Claude Code working context — not part of the published integration
+CLAUDE.md
