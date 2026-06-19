@@ -208,3 +208,119 @@ def test_pick_featured_empty_when_no_favorite():
 def test_pick_featured_empty_when_favorite_not_playing():
     coord = _featured_coord("ESP")
     assert coord._pick_featured(_board()) == {}
+
+
+# ---------------------------------------------------------------------------
+# WorldCupScoreboardCoordinator._build_board
+# ---------------------------------------------------------------------------
+
+
+def _scoreboard_payload():
+    """A minimal scoreboard payload with the keys _build_board reads."""
+    return {
+        "day": {"date": "2026-06-19"},
+        "season": {"year": 2026},
+        "leagues": [
+            {
+                "name": "FIFA World Cup",
+                "calendar": [
+                    {"startDate": "2026-06-11T04:00Z", "endDate": "2026-12-31T04:59Z"}
+                ],
+            }
+        ],
+        "events": [
+            {
+                "id": "1",
+                "date": "2026-06-19T19:00Z",
+                "season": {"slug": "group-stage"},
+                "competitions": [
+                    {
+                        "status": {"type": {"state": STATE_IN, "shortDetail": "69'"}},
+                        "competitors": [
+                            {"homeAway": "home", "score": "1", "team": {"abbreviation": "USA"}},
+                            {"homeAway": "away", "score": "0", "team": {"abbreviation": "AUS"}},
+                        ],
+                    }
+                ],
+            },
+            {
+                "id": "2",
+                "date": "2026-06-19T22:00Z",
+                "season": {"slug": "group-stage"},
+                "competitions": [
+                    {
+                        "status": {"type": {"state": STATE_PRE, "shortDetail": "Scheduled"}},
+                        "competitors": [
+                            {"homeAway": "home", "score": None, "team": {"abbreviation": "SCO"}},
+                            {"homeAway": "away", "score": None, "team": {"abbreviation": "MAR"}},
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+
+
+def test_build_board_shapes_payload():
+    coord = _featured_coord("USA")
+    board = coord._build_board(_scoreboard_payload())
+    assert board["league"] == "FIFA World Cup"
+    assert board["season"] == 2026
+    assert board["day"] == "2026-06-19"
+    assert board["match_count"] == 2
+    assert board["live_count"] == 1  # only the STATE_IN match
+    assert board["calendar_start"] == "2026-06-11T04:00Z"
+    assert board["calendar_end"] == "2026-12-31T04:59Z"
+    assert board["featured"]["id"] == "1"  # USA's match
+
+
+def test_build_board_tolerates_missing_calendar_and_day():
+    coord = _featured_coord("")
+    board = coord._build_board({"events": []})
+    assert board["match_count"] == 0
+    assert board["live_count"] == 0
+    assert board["day"] is None
+    assert board["calendar_start"] is None
+    assert board["calendar_end"] is None
+    assert board["featured"] == {}
+
+
+# ---------------------------------------------------------------------------
+# WorldCupScoreboardCoordinator.async_get_board_for_date — navigation bounds
+# ---------------------------------------------------------------------------
+
+
+def _board_for_date(date_str, payload):
+    """Run async_get_board_for_date with a stubbed network fetch."""
+    import asyncio
+
+    coord = _featured_coord("USA")
+
+    async def _fake_get_json(url):
+        assert f"dates={date_str}" in url
+        return payload
+
+    coord._get_json = _fake_get_json
+    return asyncio.run(coord.async_get_board_for_date(date_str))
+
+
+def test_board_for_date_pins_day_to_request_and_allows_navigation():
+    board = _board_for_date("20260619", _scoreboard_payload())
+    # A dated query omits `day`; it must be pinned to the requested date.
+    assert board["day"] == "2026-06-19"
+    assert board["has_prev"] is True
+    assert board["has_next"] is True
+
+
+def test_board_for_date_disables_prev_at_tournament_start():
+    board = _board_for_date("20260611", _scoreboard_payload())
+    assert board["day"] == "2026-06-11"
+    assert board["has_prev"] is False  # at/below calendar start
+    assert board["has_next"] is True
+
+
+def test_board_for_date_disables_next_at_tournament_end():
+    board = _board_for_date("20261231", _scoreboard_payload())
+    assert board["day"] == "2026-12-31"
+    assert board["has_prev"] is True
+    assert board["has_next"] is False  # at/above calendar end

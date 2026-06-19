@@ -122,9 +122,14 @@ class WorldCupScoreboardCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # matches are already sorted live > upcoming > finished, so the first is best.
         return mine[0]
 
-    async def _async_update_data(self) -> dict[str, Any]:
-        payload = await self._get_json(SCOREBOARD_URL)
+    def _build_board(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Flatten a scoreboard payload into the card-facing board dict.
 
+        Shared by the live poll (``_async_update_data``) and on-demand day
+        navigation (``async_get_board_for_date``), so both produce identically
+        shaped boards. Pure with respect to ``self`` apart from the favorite —
+        it does not touch the poll interval (that's the live refresh's job).
+        """
         matches: list[dict[str, Any]] = []
         for event in payload.get("events") or []:
             m = _normalize_event(event)
@@ -133,16 +138,8 @@ class WorldCupScoreboardCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         matches.sort(key=_sort_key)
 
         live_count = sum(1 for m in matches if m["status"]["state"] in LIVE_STATES)
-
-        # Tighten the poll interval while a match is live so the score and clock
-        # stay fresh; relax it back when nothing is on.
-        desired = (
-            LIVE_SCAN_INTERVAL_SECONDS if live_count else DEFAULT_SCAN_INTERVAL_SECONDS
-        )
-        if self.update_interval != timedelta(seconds=desired):
-            self.update_interval = timedelta(seconds=desired)
-
         league = (payload.get("leagues") or [{}])[0]
+        calendar = (league.get("calendar") or [{}])[0]
 
         return {
             "league": league.get("name") or "FIFA World Cup",
@@ -151,4 +148,55 @@ class WorldCupScoreboardCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "featured": self._pick_featured(matches),
             "live_count": live_count,
             "match_count": len(matches),
+            # Anchor day for the card's ±1-day navigation. ESPN's day boundary
+            # is not midnight-UTC (today's board can include matches that fall on
+            # the next UTC date), so the card must step from this value rather
+            # than from a UTC clock.
+            "day": (payload.get("day") or {}).get("date"),
+            # Tournament window — lets the card disable arrows at the edges.
+            "calendar_start": calendar.get("startDate"),
+            "calendar_end": calendar.get("endDate"),
         }
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        payload = await self._get_json(SCOREBOARD_URL)
+        board = self._build_board(payload)
+
+        # Tighten the poll interval while a match is live so the score and clock
+        # stay fresh; relax it back when nothing is on.
+        desired = (
+            LIVE_SCAN_INTERVAL_SECONDS if board["live_count"] else DEFAULT_SCAN_INTERVAL_SECONDS
+        )
+        if self.update_interval != timedelta(seconds=desired):
+            self.update_interval = timedelta(seconds=desired)
+
+        return board
+
+    async def async_get_board_for_date(self, date_str: str) -> dict[str, Any]:
+        """Return the board for a single ``YYYYMMDD`` day for card navigation.
+
+        Used by the ``world_cup_scoreboard/board_at_date`` WebSocket command so
+        the card's ◀ ▶ arrows can page back through previous results and forward
+        through upcoming match days without disturbing the shared live sensor
+        (which always tracks today). ``has_prev``/``has_next`` flag whether the
+        neighboring day still falls inside the tournament calendar window.
+        """
+        url = f"{SCOREBOARD_URL}?dates={date_str}"
+        payload = await self._get_json(url)
+        board = self._build_board(payload)
+
+        # A dated query omits the ``day`` label that the default board carries,
+        # so pin it to the requested date (``YYYYMMDD`` -> ``YYYY-MM-DD``). The
+        # card uses this both as the display label and as the value compared
+        # against the calendar edges below.
+        day = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        board["day"] = day
+
+        # Bound navigation to the tournament window. Compare the requested day
+        # against the calendar's YYYY-MM-DD edges; default to "navigable" when
+        # the calendar is absent.
+        start = (board.get("calendar_start") or "")[:10]
+        end = (board.get("calendar_end") or "")[:10]
+        board["has_prev"] = not (start and day and day <= start)
+        board["has_next"] = not (end and day and day >= end)
+        return board

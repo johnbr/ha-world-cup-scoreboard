@@ -145,12 +145,71 @@ async def _async_register_card(hass: HomeAssistant, card_url: str) -> None:
         _LOGGER.info("Manually add this resource: %s (type: module)", card_url)
 
 
+def _coordinator_for_entity(
+    hass: HomeAssistant, entity_id: str
+) -> WorldCupScoreboardCoordinator | None:
+    """Resolve the coordinator backing a scoreboard entity.
+
+    The integration is single-instance, so any configured entry's coordinator
+    serves the board. We look the entity up to stay forward-compatible and to
+    fail cleanly (``None``) before any entry is set up.
+    """
+    for value in (hass.data.get(DOMAIN) or {}).values():
+        if isinstance(value, WorldCupScoreboardCoordinator):
+            return value
+    return None
+
+
+def _register_board_at_date_websocket(hass: HomeAssistant) -> None:
+    """Register the ``world_cup_scoreboard/board_at_date`` WebSocket command.
+
+    The card's day-navigation arrows call this with the scoreboard entity id
+    and a ``YYYYMMDD`` date to fetch that day's board on demand. The result is
+    rendered in place of the live board on that one card without disturbing the
+    shared sensor (which always tracks today). Imports are local so the
+    pure-helper test harness, which imports this package but stubs Home
+    Assistant, doesn't need ``websocket_api``/``voluptuous``.
+    """
+    import voluptuous as vol
+    from homeassistant.components import websocket_api
+
+    @websocket_api.websocket_command(
+        {
+            vol.Required("type"): f"{DOMAIN}/board_at_date",
+            vol.Required("entity_id"): cv.entity_id,
+            vol.Required("date"): vol.All(cv.string, vol.Match(r"^\d{8}$")),
+        }
+    )
+    @websocket_api.async_response
+    async def _handle_board_at_date(hass, connection, msg) -> None:
+        coordinator = _coordinator_for_entity(hass, msg["entity_id"])
+        if coordinator is None:
+            connection.send_error(
+                msg["id"], "not_ready", "No World Cup Scoreboard entry is configured"
+            )
+            return
+        try:
+            board = await coordinator.async_get_board_for_date(msg["date"])
+        except Exception as err:  # surface any fetch/parse failure to the card
+            _LOGGER.debug("board_at_date WS request failed: %s", err)
+            connection.send_error(msg["id"], "fetch_failed", str(err))
+            return
+        connection.send_result(msg["id"], board or {})
+
+    websocket_api.async_register_command(hass, _handle_board_at_date)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = WorldCupScoreboardCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
+
+    # Register day-navigation WebSocket command once (idempotent across entries).
+    if not hass.data[DOMAIN].get("_ws_registered"):
+        _register_board_at_date_websocket(hass)
+        hass.data[DOMAIN]["_ws_registered"] = True
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

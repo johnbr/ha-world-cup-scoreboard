@@ -43,7 +43,14 @@ title: World Cup                      # optional
 show_featured: true                   # pin the favorite team at top
 show_completed: true                  # include finished matches
 max_matches: 0                        # 0 = no limit
+show_day_nav: true                    # ◀ ▶ arrows to page between match days
+nav_snap_back_ms: 8000                # idle ms before snapping back to today (0 = sticky)
 ```
+
+The ◀ / ▶ arrows page back through previous days' results and forward through
+upcoming fixtures (bounded to the tournament window). Each day is fetched on
+demand without disturbing the live sensor, and the card snaps back to today
+after `nav_snap_back_ms` of inactivity — tap ⟳ to return immediately.
 
 ## Data source
 

@@ -58,6 +58,10 @@ class WorldCupScoreboardSensor(
             "live_count": data.get("live_count", 0),
             "matches": data.get("matches", []),
             "featured": data.get("featured", {}),
+            # Anchor + bounds for the card's ◀ ▶ day navigation.
+            "day": data.get("day"),
+            "calendar_start": data.get("calendar_start"),
+            "calendar_end": data.get("calendar_end"),
         }
 
     @property
