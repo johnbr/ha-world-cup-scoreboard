@@ -1,0 +1,18 @@
+{
+  "domain": "world_cup_scoreboard",
+  "name": "World Cup Scoreboard",
+  "codeowners": [
+    "@johnbr"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "http",
+    "lovelace"
+  ],
+  "documentation": "https://github.com/johnbr/ha-world-cup-scoreboard",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/johnbr/ha-world-cup-scoreboard/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

@@ -1,0 +1,17 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "World Cup Scoreboard",
+        "description": "Tracks all FIFA World Cup matches. Optionally pin a favorite team to highlight it on the card.",
+        "data": {
+          "favorite_team": "Favorite team (ESPN abbreviation, e.g. USA, BRA, ARG — optional)",
+          "name": "Name"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "World Cup Scoreboard is already set up."
+    }
+  }
+}
