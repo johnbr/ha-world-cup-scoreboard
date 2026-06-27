@@ -10,7 +10,7 @@ from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, LIVE_STATES
 from .coordinator import WorldCupScoreboardCoordinator
 
 
@@ -50,6 +50,7 @@ class WorldCupScoreboardSensor(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         data = self.coordinator.data or {}
+        featured = data.get("featured") or {}
         return {
             "league": data.get("league"),
             "season": data.get("season"),
@@ -57,7 +58,11 @@ class WorldCupScoreboardSensor(
             "match_count": data.get("match_count", 0),
             "live_count": data.get("live_count", 0),
             "matches": data.get("matches", []),
-            "featured": data.get("featured", {}),
+            "featured": featured,
+            # True only while the favorite team's match is in progress — a flat
+            # boolean so a plain Lovelace `conditional` card can show/hide the
+            # featured-only scorecard without drilling into nested dicts.
+            "featured_live": (featured.get("status") or {}).get("state") in LIVE_STATES,
             # Anchor + bounds for the card's ◀ ▶ day navigation.
             "day": data.get("day"),
             "calendar_start": data.get("calendar_start"),

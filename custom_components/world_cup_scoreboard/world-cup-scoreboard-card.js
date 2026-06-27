@@ -19,8 +19,14 @@
  *   featured_only: false                   # show ONLY the favorite team's match
  *   show_completed: true                   # include finished matches
  *   max_matches: 0                         # 0 = no limit
+ *   layout: "default"                      # "mlb" = stacked rows styled like the MLB card
  *   show_day_nav: true                     # ◀ ▶ arrows to page between days
  *   nav_snap_back_ms: 8000                 # idle ms before snapping back to today (0 = sticky)
+ *
+ * The "mlb" layout renders each match as two stacked team rows (away over home),
+ * logo + name on the left and score on the right, with an understated status
+ * marker (live clock / kickoff time / FT) off to the right — mirroring the
+ * MLB Live Game card's scoreboard so the two cards sit together cleanly.
  */
 
 const STATE_PRE = "pre";
@@ -95,6 +101,7 @@ class WorldCupScoreboardCard extends HTMLElement {
       featured_only: false,
       show_completed: true,
       max_matches: 0,
+      layout: "default",
       show_day_nav: true,
       nav_snap_back_ms: 8000,
       ...(config || {}),
@@ -337,6 +344,52 @@ class WorldCupScoreboardCard extends HTMLElement {
       </div>`;
   }
 
+  // --- MLB-style layout (mirrors the MLB Live Game card's scoreboard) --------
+  // Two stacked team rows (away over home), each `[crest] name … score`, with a
+  // single understated status marker to the right. Intentionally drops the
+  // filled/blinking live pill — just the clock/time text, MLB-style.
+
+  _mlbMarker(match) {
+    const status = match.status || {};
+    const state = status.state || "";
+    if (state === STATE_IN) {
+      return { cls: "live", text: status.clock ? esc(status.clock) : "LIVE" };
+    }
+    if (state === STATE_POST) {
+      return { cls: "final", text: esc(status.detail || "FT") };
+    }
+    return { cls: "pre", text: esc(kickoffLocal(match.date) || status.detail || "Scheduled") };
+  }
+
+  _mlbTeamRow(team) {
+    const logo = team.logo
+      ? `<img class="mlogo" src="${esc(team.logo)}" alt="" loading="lazy" />`
+      : `<span class="mlogo ph">${esc(team.abbr || "?")}</span>`;
+    const name = esc(team.name || team.short_name || team.abbr || "—");
+    const score = team.score == null ? "—" : esc(team.score);
+    return `
+      <div class="mrow${team.winner ? " win" : ""}">
+        <div class="mleft">${logo}<span class="mname">${name}</span></div>
+        <div class="mright"><span class="mscoreval">${score}</span></div>
+      </div>`;
+  }
+
+  _mlbRow(match) {
+    const marker = this._mlbMarker(match);
+    const note = match.note ? `<div class="mnote">${esc(match.note)}</div>` : "";
+    return `
+      <div class="mlbmatch">
+        ${note}
+        <div class="mscore">
+          <div class="mteams">
+            ${this._mlbTeamRow(match.away)}
+            ${this._mlbTeamRow(match.home)}
+          </div>
+          <div class="mmarker ${marker.cls}">${marker.text}</div>
+        </div>
+      </div>`;
+  }
+
   _wireEvents() {
     if (this._navWired) return;
     this._navWired = true;
@@ -383,13 +436,21 @@ class WorldCupScoreboardCard extends HTMLElement {
       if (cfg.max_matches > 0) matches = matches.slice(0, cfg.max_matches);
     }
 
-    const header = `
+    const mlb = cfg.layout === "mlb";
+    // The MLB-style layout mirrors the MLB card, which carries no big title /
+    // sub line — so show a header only when a title is explicitly configured.
+    const header = mlb
+      ? (cfg.title ? `<div class="header mlbhdr"><div class="title">${esc(cfg.title)}</div></div>` : "")
+      : `
       <div class="header">
         <div class="title">${esc(cfg.title || attrs.league || "World Cup")}</div>
         <div class="sub">${esc(attrs.league || "")}${attrs.season ? " · " + esc(attrs.season) : ""}${attrs.live_count ? ` · ${attrs.live_count} live` : ""}</div>
       </div>`;
 
     const navRow = this._navRow(attrs);
+    const rowFn = mlb
+      ? (m) => this._mlbRow(m)
+      : (m, feat) => this._row(m, feat);
 
     let body;
     if (meta && meta.loading) {
@@ -403,12 +464,12 @@ class WorldCupScoreboardCard extends HTMLElement {
             : "No favorite team set — re-add the integration to choose one.")
         : "No matches scheduled.";
       body = matches.length || featured
-        ? `${featured ? this._row(featured, true) : ""}${matches.map((m) => this._row(m, false)).join("")}`
+        ? `${featured ? rowFn(featured, true) : ""}${matches.map((m) => rowFn(m, false)).join("")}`
         : `<div class="empty">${esc(emptyMsg)}</div>`;
     }
 
     this.shadowRoot.innerHTML = this._styles() +
-      `<ha-card>${header}${navRow}<div class="list">${body}</div></ha-card>`;
+      `<ha-card class="${mlb ? "mlbskin" : ""}">${header}${navRow}<div class="list${mlb ? " mlblist" : ""}">${body}</div></ha-card>`;
   }
 
   _styles() {
@@ -448,6 +509,27 @@ class WorldCupScoreboardCard extends HTMLElement {
       .fav-tag { margin-top:4px; font-size:0.68rem; font-weight:700; color: var(--primary-color); }
       .empty { padding:18px 4px; text-align:center; color: var(--secondary-text-color); }
       .empty.loading { font-style:italic; }
+
+      /* ── MLB-style layout (layout: "mlb") — mirrors the MLB Live Game card ── */
+      ha-card.mlbskin { padding:10px 14px; }
+      .mlbhdr { margin-bottom:6px; }
+      .mlblist { gap:0; }
+      .mlbmatch { padding:2px 0; }
+      .mlbmatch + .mlbmatch { border-top:1px solid var(--divider-color); margin-top:8px; padding-top:8px; }
+      .mscore { display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:10px; align-items:center; }
+      .mteams { display:flex; flex-direction:column; }
+      .mrow { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:1px 0; opacity:0.9; }
+      .mrow.win { opacity:1; }
+      .mleft { display:flex; align-items:center; gap:10px; min-width:0; }
+      .mlogo { width:28px; height:28px; object-fit:contain; flex:0 0 28px; }
+      .mlogo.ph { display:inline-flex; align-items:center; justify-content:center; border-radius:50%; background: var(--secondary-background-color); font-size:0.7rem; font-weight:700; }
+      .mname { line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:16px; font-weight:500; }
+      .mright { display:flex; align-items:center; }
+      .mscoreval { min-width:20px; text-align:right; font-variant-numeric:tabular-nums; font-size:1.05em; font-weight:500; }
+      .mmarker { min-width:28px; text-align:center; line-height:1.15; font-size:0.95rem; color: var(--secondary-text-color); }
+      .mmarker.live { color: var(--success-color, #43a047); }
+      .mmarker.final { color: var(--primary-text-color); }
+      .mnote { font-size:0.72rem; text-transform:uppercase; letter-spacing:.04em; color: var(--secondary-text-color); margin-bottom:4px; }
     </style>`;
   }
 
